@@ -15,22 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//go:build aix
-// +build aix
-
-package aix
+package windows
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBootTime(t *testing.T) {
-	bt, err := bootTime("testdata/utmp")
-	if err != nil {
-		t.Fatal(err)
-	}
+	bootTime, err := BootTime()
+	require.NoError(t, err)
 
-	assert.EqualValues(t, bt.Unix(), 1585726535)
+	// There should be no sub-second precision in the time.
+	assert.Equal(t, 0, bootTime.Nanosecond())
 }

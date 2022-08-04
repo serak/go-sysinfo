@@ -15,6 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+//go:build aix && ppc64 && cgo
+// +build aix,ppc64,cgo
+
 package aix
 
 /*
@@ -23,9 +26,8 @@ package aix
 import "C"
 
 import (
+	"fmt"
 	"strconv"
-
-	"github.com/pkg/errors"
 )
 
 var oslevel string
@@ -33,17 +35,17 @@ var oslevel string
 func getKernelVersion() (int, int, error) {
 	name := C.struct_utsname{}
 	if _, err := C.uname(&name); err != nil {
-		return 0, 0, errors.Wrap(err, "kernel version: uname")
+		return 0, 0, fmt.Errorf("kernel version: uname: %w", err)
 	}
 
 	version, err := strconv.Atoi(C.GoString(&name.version[0]))
 	if err != nil {
-		return 0, 0, errors.Wrap(err, "parsing kernel version")
+		return 0, 0, fmt.Errorf("parsing kernel version: %w", err)
 	}
 
 	release, err := strconv.Atoi(C.GoString(&name.release[0]))
 	if err != nil {
-		return 0, 0, errors.Wrap(err, "parsing kernel release")
+		return 0, 0, fmt.Errorf("parsing kernel release: %w", err)
 	}
 	return version, release, nil
 }

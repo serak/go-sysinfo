@@ -19,16 +19,17 @@ package sysinfo
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	osUser "os/user"
 	"runtime"
+	"sort"
 	"strconv"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -162,20 +163,23 @@ func TestSelf(t *testing.T) {
 	}
 
 	if v, ok := process.(types.Environment); ok {
-		expectedEnv := map[string]string{}
-		for _, keyValue := range os.Environ() {
-			parts := strings.SplitN(keyValue, "=", 2)
-			if len(parts) != 2 {
-				t.Fatal("failed to parse os.Environ()")
-			}
-			expectedEnv[parts[0]] = parts[1]
-		}
 		actualEnv, err := v.Environment()
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Equal(t, expectedEnv, actualEnv)
 		output["process.env"] = actualEnv
+
+		// Format the output to match format from os.Environ().
+		keyEqualsValueList := make([]string, 0, len(actualEnv))
+		for k, v := range actualEnv {
+			keyEqualsValueList = append(keyEqualsValueList, k+"="+v)
+		}
+		sort.Strings(keyEqualsValueList)
+
+		expectedEnv := os.Environ()
+		sort.Strings(expectedEnv)
+
+		assert.Equal(t, expectedEnv, keyEqualsValueList)
 	}
 
 	memInfo, err := process.Memory()
@@ -284,8 +288,7 @@ func TestProcesses(t *testing.T) {
 	for _, proc := range procs {
 		info, err := proc.Info()
 		if err != nil {
-			cause := errors.Cause(err)
-			if os.IsPermission(cause) || syscall.ESRCH == cause {
+			if errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.ESRCH) {
 				// The process may no longer exist by the time we try fetching
 				// additional information so ignore ESRCH (no such process).
 				continue

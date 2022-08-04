@@ -28,12 +28,12 @@ import "C"
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
 	"unsafe"
-
-	"github.com/pkg/errors"
 
 	"github.com/elastic/go-sysinfo/types"
 )
@@ -43,9 +43,9 @@ import (
 func (s darwinSystem) Processes() ([]types.Process, error) {
 	n, err := C.proc_listallpids(nil, 0)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error getting process count from proc_listallpids (n = %v)", n)
+		return nil, fmt.Errorf("error getting process count from proc_listallpids (n = %v): %w", n, err)
 	} else if n <= 0 {
-		return nil, errors.Errorf("proc_listallpids returned %v", n)
+		return nil, fmt.Errorf("proc_listallpids returned %v", n)
 	}
 
 	var pid C.int
@@ -53,9 +53,9 @@ func (s darwinSystem) Processes() ([]types.Process, error) {
 	buf := make([]byte, bufsize)
 	n, err = C.proc_listallpids(unsafe.Pointer(&buf[0]), bufsize)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error getting processes from proc_listallpids (n = %v)", n)
+		return nil, fmt.Errorf("error getting processes from proc_listallpids (n = %v): %w", n, err)
 	} else if n <= 0 {
-		return nil, errors.Errorf("proc_listallpids returned %v", n)
+		return nil, fmt.Errorf("proc_listallpids returned %v", n)
 	}
 
 	bbuf := bytes.NewBuffer(buf)
@@ -63,7 +63,7 @@ func (s darwinSystem) Processes() ([]types.Process, error) {
 	for i := 0; i < int(n); i++ {
 		err = binary.Read(bbuf, binary.LittleEndian, &pid)
 		if err != nil {
-			return nil, errors.Wrap(err, "error reading binary list of PIDs")
+			return nil, fmt.Errorf("error reading binary list of PIDs: %w", err)
 		}
 
 		if pid == 0 {
@@ -257,12 +257,13 @@ func kern_procargs(pid int, p *process) error {
 		if len(l) == 0 {
 			break
 		}
+
 		parts := bytes.SplitN(l, []byte{'='}, 2)
-		if len(parts) != 2 {
-			return errors.New("failed to parse")
-		}
 		key := string(parts[0])
-		value := string(parts[1])
+		var value string
+		if len(parts) == 2 {
+			value = string(parts[1])
+		}
 		env[key] = value
 	}
 	p.env = env

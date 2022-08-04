@@ -15,6 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+//go:build aix && ppc64 && cgo
+// +build aix,ppc64,cgo
+
 package aix
 
 /*
@@ -22,15 +25,13 @@ package aix
 */
 import "C"
 
-import (
-	"github.com/pkg/errors"
-)
+import "fmt"
 
 // MachineID returns the id of the machine
 func MachineID() (string, error) {
 	name := C.struct_utsname{}
 	if _, err := C.uname(&name); err != nil {
-		return "", errors.Wrap(err, "machine id")
+		return "", fmt.Errorf("machine id: %w", err)
 	}
 	return C.GoString(&name.machine[0]), nil
 }
