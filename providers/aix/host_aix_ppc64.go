@@ -213,3 +213,7 @@ func (r *reader) uniqueID(h *host) {
 	}
 	h.info.UniqueID = v
 }
+
+func (h *host) FQDN() (string, error) {
+	return shared.FQDN()
+}
