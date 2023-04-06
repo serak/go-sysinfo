@@ -15,15 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//go:build (amd64 && cgo) || (arm64 && cgo)
-// +build amd64,cgo arm64,cgo
+//go:build amd64 || arm64
+// +build amd64 arm64
 
 package darwin
-
-// #cgo LDFLAGS:-lproc
-// #include <sys/sysctl.h>
-// #include <libproc.h>
-import "C"
 
 import (
 	"bytes"
@@ -32,48 +27,32 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"syscall"
 	"time"
-	"unsafe"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/elastic/go-sysinfo/types"
 )
 
-//go:generate sh -c "go tool cgo -godefs defs_darwin.go > ztypes_darwin.go"
-
 func (s darwinSystem) Processes() ([]types.Process, error) {
-	n, err := C.proc_listallpids(nil, 0)
+	ps, err := unix.SysctlKinfoProcSlice("kern.proc.all")
 	if err != nil {
-		return nil, fmt.Errorf("error getting process count from proc_listallpids (n = %v): %w", n, err)
-	} else if n <= 0 {
-		return nil, fmt.Errorf("proc_listallpids returned %v", n)
+		return nil, fmt.Errorf("failed to read process table: %w", err)
 	}
 
-	var pid C.int
-	bufsize := n * C.int(unsafe.Sizeof(pid))
-	buf := make([]byte, bufsize)
-	n, err = C.proc_listallpids(unsafe.Pointer(&buf[0]), bufsize)
-	if err != nil {
-		return nil, fmt.Errorf("error getting processes from proc_listallpids (n = %v): %w", n, err)
-	} else if n <= 0 {
-		return nil, fmt.Errorf("proc_listallpids returned %v", n)
-	}
-
-	bbuf := bytes.NewBuffer(buf)
-	processes := make([]types.Process, 0, n)
-	for i := 0; i < int(n); i++ {
-		err = binary.Read(bbuf, binary.LittleEndian, &pid)
-		if err != nil {
-			return nil, fmt.Errorf("error reading binary list of PIDs: %w", err)
-		}
-
+	processes := make([]types.Process, 0, len(ps))
+	for _, kp := range ps {
+		pid := kp.Proc.P_pid
 		if pid == 0 {
 			continue
 		}
 
-		processes = append(processes, &process{pid: int(pid)})
+		processes = append(processes, &process{
+			pid: int(pid),
+		})
 	}
+
 	return processes, nil
 }
 
@@ -115,12 +94,12 @@ func (p *process) Info() (types.ProcessInfo, error) {
 	}
 
 	var task procTaskAllInfo
-	if err := getProcTaskAllInfo(p.pid, &task); err != nil {
+	if err := getProcTaskAllInfo(p.pid, &task); err != nil && err != types.ErrNotImplemented {
 		return types.ProcessInfo{}, err
 	}
 
 	var vnode procVnodePathInfo
-	if err := getProcVnodePathInfo(p.pid, &vnode); err != nil {
+	if err := getProcVnodePathInfo(p.pid, &vnode); err != nil && err != types.ErrNotImplemented {
 		return types.ProcessInfo{}, err
 	}
 
@@ -143,18 +122,23 @@ func (p *process) Info() (types.ProcessInfo, error) {
 }
 
 func (p *process) User() (types.UserInfo, error) {
-	var task procTaskAllInfo
-	if err := getProcTaskAllInfo(p.pid, &task); err != nil {
+	kproc, err := unix.SysctlKinfoProc("kern.proc.pid", p.pid)
+	if err != nil {
 		return types.UserInfo{}, err
 	}
 
+	egid := ""
+	if len(kproc.Eproc.Ucred.Groups) > 0 {
+		egid = strconv.Itoa(int(kproc.Eproc.Ucred.Groups[0]))
+	}
+
 	return types.UserInfo{
-		UID:  strconv.Itoa(int(task.Pbsd.Pbi_ruid)),
-		EUID: strconv.Itoa(int(task.Pbsd.Pbi_uid)),
-		SUID: strconv.Itoa(int(task.Pbsd.Pbi_svuid)),
-		GID:  strconv.Itoa(int(task.Pbsd.Pbi_rgid)),
-		EGID: strconv.Itoa(int(task.Pbsd.Pbi_gid)),
-		SGID: strconv.Itoa(int(task.Pbsd.Pbi_svgid)),
+		UID:  strconv.Itoa(int(kproc.Eproc.Pcred.P_ruid)),
+		EUID: strconv.Itoa(int(kproc.Eproc.Ucred.Uid)),
+		SUID: strconv.Itoa(int(kproc.Eproc.Pcred.P_svuid)),
+		GID:  strconv.Itoa(int(kproc.Eproc.Pcred.P_rgid)),
+		SGID: strconv.Itoa(int(kproc.Eproc.Pcred.P_svgid)),
+		EGID: egid,
 	}, nil
 }
 
@@ -188,32 +172,6 @@ func (p *process) Memory() (types.MemoryInfo, error) {
 	}, nil
 }
 
-func getProcTaskAllInfo(pid int, info *procTaskAllInfo) error {
-	size := C.int(unsafe.Sizeof(*info))
-	ptr := unsafe.Pointer(info)
-
-	n, err := C.proc_pidinfo(C.int(pid), C.PROC_PIDTASKALLINFO, 0, ptr, size)
-	if err != nil {
-		return err
-	} else if n != size {
-		return errors.New("failed to read process info with proc_pidinfo")
-	}
-
-	return nil
-}
-
-func getProcVnodePathInfo(pid int, info *procVnodePathInfo) error {
-	size := C.int(unsafe.Sizeof(*info))
-	ptr := unsafe.Pointer(info)
-
-	n := C.proc_pidinfo(C.int(pid), C.PROC_PIDVNODEPATHINFO, 0, ptr, size)
-	if n != size {
-		return errors.New("failed to read vnode info with proc_pidinfo")
-	}
-
-	return nil
-}
-
 var nullTerminator = []byte{0}
 
 // wrapper around sysctl KERN_PROCARGS2
@@ -222,7 +180,12 @@ var nullTerminator = []byte{0}
 func kern_procargs(pid int, p *process) error {
 	data, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil {
-		return nil
+		if errors.Is(err, syscall.EINVAL) {
+			// sysctl returns "invalid argument" for both "no such process"
+			// and "operation not permitted" errors.
+			return fmt.Errorf("no such process or operation not permitted: %w", err)
+		}
+		return err
 	}
 	buf := bytes.NewBuffer(data)
 

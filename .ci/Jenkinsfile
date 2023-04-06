@@ -37,18 +37,22 @@ pipeline {
         axes {
           axis {
             name 'GO_VERSION'
-            values '1.17.11', '1.18.3'
+            values '1.18.10', '1.19.5'
           }
           axis {
             name 'PLATFORM'
             values 'ubuntu-18 && immutable', 'windows-2019 && immutable', 'orka && darwin && x86_64', 'orka && darwin && arm64'
+          }
+          axis {
+            name 'CGO_ENABLED'
+            values '0', '1'
           }
         }
         excludes {
           exclude {
             axis {
               name 'GO_VERSION'
-              values '1.17.11'
+              values '1.18.10'
             }
             axis {
               name 'PLATFORM'
@@ -58,7 +62,7 @@ pipeline {
           exclude {
             axis {
               name 'GO_VERSION'
-              values '1.18.3'
+              values '1.19.5'
             }
             axis {
               name 'PLATFORM'
@@ -68,6 +72,9 @@ pipeline {
         }
         stages {
           stage('Test') {
+	    environment {
+	      CGO_ENABLED = "${env.CGO_ENABLED}"
+            }
             options { skipDefaultCheckout() }
             agent { label "${PLATFORM}" }
             steps {

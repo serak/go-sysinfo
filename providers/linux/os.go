@@ -37,7 +37,7 @@ const (
 	osRelease      = "/etc/os-release"
 	lsbRelease     = "/etc/lsb-release"
 	distribRelease = "/etc/*-release"
-	versionGrok    = `(?P<version>(?P<major>[0-9]+)\.?(?P<minor>[0-9]+)?\.?(?P<patch>\w+)?)(?: \((?P<codename>\w+)\))?`
+	versionGrok    = `(?P<version>(?P<major>[0-9]+)\.?(?P<minor>[0-9]+)?\.?(?P<patch>\w+)?)(?: \((?P<codename>[-\w ]+)\))?`
 )
 
 var (
@@ -50,9 +50,10 @@ var (
 
 // familyMap contains a mapping of family -> []platforms.
 var familyMap = map[string][]string{
-	"redhat": {"redhat", "fedora", "centos", "scientific", "oraclelinux", "ol", "amzn", "rhel"},
+	"redhat": {"redhat", "fedora", "centos", "scientific", "oraclelinux", "ol",
+		"amzn", "rhel", "almalinux", "openeuler", "rocky"},
 	"debian": {"debian", "ubuntu", "raspbian", "linuxmint"},
-	"suse":   {"suse", "sles", "opensuse"},
+	"suse":   {"suse", "sles", "opensuse", "opensuse-leap", "opensuse-tumbleweed"},
 }
 
 var platformToFamilyMap map[string]string
@@ -152,6 +153,11 @@ func makeOSInfo(osRelease map[string]string) (*types.OSInfo, error) {
 		Version:  osRelease["VERSION"],
 		Build:    osRelease["BUILD_ID"],
 		Codename: osRelease["VERSION_CODENAME"],
+	}
+
+	if os.Version == "" {
+		// Fallback to VERSION_ID if VERSION is empty.
+		os.Version = osRelease["VERSION_ID"]
 	}
 
 	if os.Codename == "" {

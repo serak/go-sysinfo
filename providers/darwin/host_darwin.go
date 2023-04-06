@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//go:build (amd64 && cgo) || (arm64 && cgo)
-// +build amd64,cgo arm64,cgo
+//go:build amd64 || arm64
+// +build amd64 arm64
 
 package darwin
 
@@ -84,16 +84,24 @@ func (h *host) Memory() (*types.HostMemoryInfo, error) {
 		return nil, fmt.Errorf("failed to get page size: %w", err)
 	}
 
-	// Virtual Memory Statistics
-	vmStat, err := getHostVMInfo64()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get virtual memory statistics: %w", err)
-	}
-
 	// Swap
 	swap, err := getSwapUsage()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get swap usage: %w", err)
+	}
+
+	mem.VirtualTotal = swap.Total
+	mem.VirtualUsed = swap.Used
+	mem.VirtualFree = swap.Available
+
+	// Virtual Memory Statistics
+	vmStat, err := getHostVMInfo64()
+	if errors.Is(err, types.ErrNotImplemented) {
+		return &mem, nil
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get virtual memory statistics: %w", err)
 	}
 
 	inactiveBytes := uint64(vmStat.Inactive_count) * pageSizeBytes
@@ -127,11 +135,27 @@ func (h *host) Memory() (*types.HostMemoryInfo, error) {
 	mem.Used = uint64(vmStat.Internal_page_count+vmStat.Wire_count+vmStat.Compressor_page_count) * pageSizeBytes
 	mem.Free = uint64(vmStat.Free_count) * pageSizeBytes
 	mem.Available = mem.Free + inactiveBytes + purgeableBytes
-	mem.VirtualTotal = swap.Total
-	mem.VirtualUsed = swap.Used
-	mem.VirtualFree = swap.Available
 
 	return &mem, nil
+}
+
+func (h *host) FQDN() (string, error) {
+	return shared.FQDN()
+}
+
+func (h *host) LoadAverage() (*types.LoadAverageInfo, error) {
+	load, err := getLoadAverage()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get loadavg: %w", err)
+	}
+
+	scale := float64(load.scale)
+
+	return &types.LoadAverageInfo{
+		One:     float64(load.load[0]) / scale,
+		Five:    float64(load.load[1]) / scale,
+		Fifteen: float64(load.load[2]) / scale,
+	}, nil
 }
 
 func newHost() (*host, error) {
